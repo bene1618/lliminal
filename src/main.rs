@@ -1,3 +1,6 @@
+mod llm;
+mod tui;
+
 fn main() {
-    println!("Hello, world!");
+    tui::main()
 }
