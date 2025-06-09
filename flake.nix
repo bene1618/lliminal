@@ -37,9 +37,9 @@
             clippy
             rustfmt
 
-            # Development tools
-            # pkg-config
-            # openssl
+            # OpenSSL
+            pkg-config
+            openssl
 
             # Terminal UI libraries dependencies
             # ncurses

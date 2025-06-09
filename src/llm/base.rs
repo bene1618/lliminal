@@ -11,67 +11,80 @@ pub trait LlmClient {
 /// The request which contains all information to generate a text completion
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompletionRequest {
-    /// The system prompt and previous messages
-    pub messages: Vec<Message>
+    /// The system prompts
+    pub system: Vec<SystemPrompt>,
+
+    /// The previous messages
+    pub messages: Vec<Message>,
+}
+
+/// A system message, which the model should follow regardless of the other messages
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SystemPrompt {
+    pub content: String
 }
 
 /// A message in a chat which should be completed
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
-    System(SystemMessage),
-    User(UserMessage),
+    /// A user message, which might contain of different parts to support multimodality
+    User { parts: Vec<UserMessagePart> },
+    /// An assistant message, which contains a text response and/or requests for tool calls
     Assistant(AssistantMessage),
-    Tool(ToolMessage)
+    /// The response from a tool call
+    Tool {
+        content: String,
+        tool_call_id: String
+    }
 }
 
-/// A system message, which the model should follow regardless of the other messages
+/// A message from the assistant
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SystemMessage {
-    content: String
-}
-
-/// A user message, which might contain of different parts to support multimodality
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UserMessage {
-    parts: Vec<UserMessagePart>
+pub struct AssistantMessage {
+    pub content: Option<String>,
+    pub tool_calls: Vec<ToolCall>
 }
 
 /// A part of a user message
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UserMessagePart {
     Text(String),
-    Image(Bytes),
-    Audio(Bytes),
-    File(Bytes)
+    Image { data: Bytes, media_type: ImageMediaType },
+    Audio { data: Bytes, media_type: AudioMediaType },
+    File { data: Bytes, media_type: FileMediaType }
 }
 
-/// The message coming from the model
+/// The media type for an image representation
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AssistantMessage {
-    content: Option<String>,
-    tool_calls: Vec<ToolCall>
+pub enum ImageMediaType {
+    JPEG, PNG, GIF, WEBP
+}
+
+/// The media type for an audio representation
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AudioMediaType {
+    WAV, MP3
+}
+
+/// The media type for a file representation
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileMediaType {
+    PlainText, PDF
 }
 
 /// A tool call allows calling an external tool like an MCP server for retrieving more information
 /// or for conducting actions on behalf of the user.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
-    id: String,
-    function_name: String,
-    function_args_json: String
-}
-
-/// The message of a tool in response to a tool use assistant message
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolMessage {
-    content: String,
-    tool_call_id: String
+    pub id: String,
+    pub function_name: String,
+    pub function_args_json: String
 }
 
 /// The response from the LLM tool
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompletionResponse {
-    message: AssistantMessage
+    pub message: AssistantMessage
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
