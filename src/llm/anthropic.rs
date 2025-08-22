@@ -1,9 +1,8 @@
-use std::vec::IntoIter;
+use crate::llm::{AssistantMessageContent, LlmError};
 
-use crate::llm::AssistantMessageContent;
-
-use super::{AssistantMessagePart, CompletionRequest, LlmClient, UserMessagePart};
-use futures::stream::{self, Iter};
+use super::{AssistantMessagePart, CompletionRequest, LlmClient, Result, UserMessagePart};
+use eventsource_stream::Eventsource;
+use futures::{channel::mpsc, stream::IntoStream, SinkExt, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
@@ -21,13 +20,8 @@ pub struct AnthropicLlmClientConfig {
     pub max_tokens: u32
 }
 
-#[derive(Deserialize)]
-struct MessagesResponse {
-    content: Vec<MessageContent>
-}
-
 impl LlmClient for AnthropicLlmClient {
-    type Response = Iter<IntoIter<super::Result<Vec<super::Message>>>>;
+    type Response = IntoStream<mpsc::UnboundedReceiver<Result<Vec<super::Message>>>>;
 
     async fn complete(&mut self, request: &CompletionRequest) -> Self::Response {
         const PATH: &str = "/v1/messages";
@@ -36,34 +30,131 @@ impl LlmClient for AnthropicLlmClient {
             max_tokens: self.config.max_tokens,
             system: request.system.iter().map(|prompt| prompt.into()).collect(),
             messages: request.messages.iter().map(|message| message.into()).collect(),
+            stream: true
         };
         let client = reqwest::Client::new();
         let url = self.config.base_url.join(PATH).unwrap();
-        let response: MessagesResponse = client.post(url)
+        let mut response_eventsource = client.post(url)
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", API_VERSION)
             .json(&request)
             .send()
             .await
             .unwrap()
-            .json()
-            .await
-            .unwrap();
-        let content = response.content.iter().filter_map(|c| {
-            if let MessageContent::Text { text } = c {
-                Some(text.to_owned())
-            } else {
-                None
+            .bytes_stream()
+            .eventsource();
+        let (mut sender, receiver) = mpsc::unbounded::<Result<Vec<super::Message>>>();
+        tokio::spawn(async move {
+            let mut state_holder = StreamingResponseStateHolder::new();
+            while let Some(event) = response_eventsource.next().await {
+                match event {
+                    Ok(event) => {
+                        if let Some(current_result) = state_holder.handle_event(event.event, event.data) {
+                            sender.send(current_result).await.unwrap();
+                        }
+                        if state_holder.is_completed() {
+                            break;
+                        }
+                    },
+                    Err(_) => {
+                        sender.send(Err(LlmError::UnexpectedResponse)).await.unwrap();
+                    }
+                }
             }
-        }).reduce(|acc, e| acc + &e).unwrap();
-        stream::iter(vec![
-            Ok(vec![super::Message::Assistant {
-                parts: vec![super::AssistantMessagePart {
-                    complete: true,
-                    content: AssistantMessageContent::Text { text: content }
-                }]
-            }])
-        ])
+        });
+        receiver.into_stream()
+    }
+}
+
+struct StreamingResponseStateHolder {
+    state: StreamingResponseState,
+    response_parts: Vec<AssistantMessageContent>
+}
+
+enum StreamingResponseState {
+    Init,
+    MessageTransferring,
+    ContentBlockStarted { current_content: AssistantMessageContent },
+    MessageCompleted,
+    ResponseCompleted
+}
+
+#[derive(Deserialize)]
+struct ContentBlockDeltaEvent {
+    delta: ContentBlockDelta
+}
+
+#[derive(Deserialize)]
+struct ContentBlockDelta {
+    text: String
+}
+
+impl StreamingResponseStateHolder {
+    fn new() -> Self {
+        Self { state: StreamingResponseState::Init, response_parts: vec![] }
+    }
+
+    fn handle_event(&mut self, event: String, data: String) -> Option<Result<Vec<super::Message>>> {
+        match (&self.state, event.as_str()) {
+            (StreamingResponseState::Init, "message_start") => {
+                self.state = StreamingResponseState::MessageTransferring;
+                None
+            },
+            (StreamingResponseState::MessageTransferring, "content_block_start") => {
+                self.state = StreamingResponseState::ContentBlockStarted {
+                    current_content: AssistantMessageContent::Text { text: "".to_string() }
+                };
+                None
+            },
+            (StreamingResponseState::ContentBlockStarted { current_content }, "content_block_delta") => {
+                if let Ok(delta_event) = serde_json::from_str::<ContentBlockDeltaEvent>(&data) {
+                    self.state = StreamingResponseState::ContentBlockStarted {
+                        current_content: match current_content {
+                            AssistantMessageContent::Text { text } => AssistantMessageContent::Text { text: text.to_owned() + &delta_event.delta.text },
+                        }
+                    };
+                    Some(Ok(self.current_response()))
+                } else {
+                    Some(Err(LlmError::UnexpectedResponse))
+                }
+            },
+            (StreamingResponseState::ContentBlockStarted { current_content }, "content_block_stop") => {
+                self.response_parts.push(current_content.clone());
+                self.state = StreamingResponseState::MessageTransferring;
+                Some(Ok(self.current_response()))
+            },
+            (StreamingResponseState::MessageTransferring, "message_stop") => {
+                self.state = StreamingResponseState::MessageCompleted;
+                None
+            },
+            (StreamingResponseState::MessageTransferring, "message_delta") => {
+                self.state = StreamingResponseState::ResponseCompleted;
+                None
+            },
+            (_, "ping") => None,
+            _ => Some(Err(LlmError::UnexpectedResponse))
+        }
+    }
+
+    fn current_response(&self) -> Vec<super::Message> {
+        let mut parts = Vec::new();
+        for content in &self.response_parts {
+            parts.push(AssistantMessagePart {
+                complete: true,
+                content: content.clone()
+            });
+        }
+        if let StreamingResponseState::ContentBlockStarted { current_content } = &self.state {
+            parts.push(AssistantMessagePart {
+                complete: false,
+                content: current_content.clone()
+            });
+        }
+        vec![ super::Message::Assistant { parts } ]
+    }
+
+    fn is_completed(&self) -> bool {
+        matches!(self.state, StreamingResponseState::ResponseCompleted)
     }
 }
 
@@ -73,6 +164,7 @@ struct MessagesRequest {
     max_tokens: u32,
     system: Vec<SystemPrompt>,
     messages: Vec<Message>,
+    stream: bool
 }
 
 #[derive(Serialize)]
@@ -235,18 +327,51 @@ mod tests {
         }
       ]
     }
-  ]
+  ],
+  "stream": true
 }
             "#.to_string()))
             .with_status(200)
-            .with_body(r#"{"content": [{"type": "text", "text": "My response"}]}"#)
+            .with_body(r#"
+event: message_start
+data: {"type": "message_start", "message": {"id": "msg_1nZdL29xx5MUA1yADyHTEsnR8uuvGzszyY", "type": "message", "role": "assistant", "content": [], "model": "claude-opus-4-1-20250805", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1}}}
+
+event: content_block_start
+data: {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "My"}}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": " response"}}
+
+event: content_block_stop
+data: {"type": "content_block_stop", "index": 0}
+
+event: message_delta
+data: {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence":null}, "usage": {"output_tokens": 15}}
+
+event: message_stop
+data: {"type": "message_stop"}
+            "#)
             .create();
 
-        let result = anthropic_client.complete(&request).await.next().await.expect("Did not contain response");
+        let mut result = anthropic_client.complete(&request).await;
 
         mock.assert();
 
-        assert_eq!(*result.unwrap().first().unwrap(), Message::Assistant { parts: vec![
+        assert_eq!(*result.next().await.unwrap().unwrap().first().unwrap(), Message::Assistant { parts: vec![
+            AssistantMessagePart { complete: false, content: AssistantMessageContent::Text { text: "My".to_string() } }
+        ] });
+
+        assert_eq!(*result.next().await.unwrap().unwrap().first().unwrap(), Message::Assistant { parts: vec![
+            AssistantMessagePart { complete: false, content: AssistantMessageContent::Text { text: "My response".to_string() } }
+        ] });
+
+        assert_eq!(*result.next().await.unwrap().unwrap().first().unwrap(), Message::Assistant { parts: vec![
             AssistantMessagePart { complete: true, content: AssistantMessageContent::Text { text: "My response".to_string() } }
         ] });
     }

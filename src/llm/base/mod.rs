@@ -8,7 +8,8 @@ pub type Result<T> = std::result::Result<T, LlmError>;
 /// Type for error conditions on completing a request
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LlmError {
-    ConnectionError
+    ConnectionError,
+    UnexpectedResponse
 }
 
 /// Generic trait to interact with an LLM
