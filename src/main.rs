@@ -1,4 +1,3 @@
-mod llm;
 mod tui;
 
 fn main() {

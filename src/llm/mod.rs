@@ -1,6 +1,5 @@
 mod base;
 
-mod anthropic;
+pub mod anthropic;
 
 pub use base::*;
-pub use anthropic::AnthropicLlmClient;

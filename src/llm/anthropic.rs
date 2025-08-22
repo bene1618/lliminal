@@ -1,5 +1,9 @@
-use super::{CompletionRequest, CompletionResponse, LlmClient, Result};
-use base64::{prelude::BASE64_STANDARD, Engine};
+use std::vec::IntoIter;
+
+use crate::llm::AssistantMessageContent;
+
+use super::{AssistantMessagePart, CompletionRequest, LlmClient, UserMessagePart};
+use futures::stream::{self, Iter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
@@ -7,14 +11,14 @@ use url::Url;
 const API_VERSION: &str = "2023-06-01";
 
 pub struct AnthropicLlmClient {
-    config: AnthropicLlmClientConfig
+    pub config: AnthropicLlmClientConfig
 }
 
 pub struct AnthropicLlmClientConfig {
-    base_url: Url,
-    api_key: String,
-    model: String,
-    max_tokens: u32
+    pub base_url: Url,
+    pub api_key: String,
+    pub model: String,
+    pub max_tokens: u32
 }
 
 #[derive(Deserialize)]
@@ -23,7 +27,9 @@ struct MessagesResponse {
 }
 
 impl LlmClient for AnthropicLlmClient {
-    async fn complete(&mut self, request: CompletionRequest) -> Result<CompletionResponse> {
+    type Response = Iter<IntoIter<super::Result<Vec<super::Message>>>>;
+
+    async fn complete(&mut self, request: &CompletionRequest) -> Self::Response {
         const PATH: &str = "/v1/messages";
         let request = MessagesRequest {
             model: self.config.model.clone(),
@@ -49,8 +55,15 @@ impl LlmClient for AnthropicLlmClient {
             } else {
                 None
             }
-        }).reduce(|acc, e| acc + &e);
-        Ok(CompletionResponse { message: super::AssistantMessage { content: content, tool_calls: vec![] } })
+        }).reduce(|acc, e| acc + &e).unwrap();
+        stream::iter(vec![
+            Ok(vec![super::Message::Assistant {
+                parts: vec![super::AssistantMessagePart {
+                    complete: true,
+                    content: AssistantMessageContent::Text { text: content }
+                }]
+            }])
+        ])
     }
 }
 
@@ -106,66 +119,35 @@ struct SystemPrompt {
     #[serde(rename = "type")] encoding_type: String
 }
 
+impl Message {
+    fn from_user_message_parts(parts: &Vec<UserMessagePart>) -> Self {
+        Message {
+            role: MessageRole::User,
+            content: parts.iter().cloned().map(|p| match p.content {
+                super::UserMessageContent::Text { text } => MessageContent::Text { text }
+            }).collect()
+        }
+    }
+
+    fn from_assistant_message_parts(parts: &Vec<AssistantMessagePart>) -> Self {
+        Message {
+            role: MessageRole::Assistant,
+            content: parts.iter().cloned().filter_map(|p| match p {
+                AssistantMessagePart { complete: false, content: _ } => None,
+                AssistantMessagePart {
+                    complete: true,
+                    content: AssistantMessageContent::Text { text }
+                } => Some(MessageContent::Text { text })
+            }).collect()
+        }
+    }
+}
+
 impl From<&super::Message> for Message {
     fn from(value: &super::Message) -> Self {
         match value {
-            super::Message::User { parts } => Message {
-                role: MessageRole::User,
-                content: parts.iter().cloned().map(|p| {
-                    match p {
-                        super::UserMessagePart::Text(content) => MessageContent::Text {
-                            text: content
-                        },
-                        super::UserMessagePart::Image { data, media_type } => MessageContent::Image {
-                            source: ImageSource {
-                                data: BASE64_STANDARD.encode(data),
-                                media_type: match media_type {
-                                    super::ImageMediaType::JPEG => "image/jpeg",
-                                    super::ImageMediaType::PNG => "image/png",
-                                    super::ImageMediaType::GIF => "image/gif",
-                                    super::ImageMediaType::WEBP => "image/webp",
-                                }.to_string(),
-                                encoding_type: "base64".to_string()
-                            }
-                        },
-                        super::UserMessagePart::Audio { .. } => panic!("Audio is not supported"),
-                        super::UserMessagePart::File { data, media_type } => MessageContent::Document {
-                            source: match media_type {
-                                super::FileMediaType::PlainText => DocumentSource {
-                                    data: String::from_utf8(data.to_vec()).unwrap(),
-                                    media_type: "text/plain".to_string(),
-                                    encoding_type: "text".to_string()
-                                },
-                                super::FileMediaType::PDF => DocumentSource {
-                                    data: BASE64_STANDARD.encode(data),
-                                    media_type: "application/pdf".to_string(),
-                                    encoding_type: "base64".to_string()
-                                }
-                            }
-                        }
-                    }
-                }).collect()
-            },
-            super::Message::Assistant(assistant_message) => Message {
-                role: MessageRole::Assistant,
-                content: if let Some(content) = &assistant_message.content {
-                    vec![MessageContent::Text { text: content.clone() }]
-                } else {
-                    assistant_message.tool_calls.iter().cloned().map(|tool_call| MessageContent::ToolUse {
-                        id: tool_call.id,
-                        input: serde_json::from_str(&tool_call.function_args_json).unwrap(),
-                        name: tool_call.function_name
-                    }).collect()
-                }
-            },
-            super::Message::Tool { content, tool_call_id } => Message {
-                role: MessageRole::User,
-                content: vec![MessageContent::ToolResult {
-                    tool_use_id: tool_call_id.clone(),
-                    content: content.clone(),
-                    is_error: false
-                }]
-            }
+            super::Message::User { parts } => Message::from_user_message_parts(parts),
+            super::Message::Assistant { parts } => Message::from_assistant_message_parts(parts),
         }
     }
 }
@@ -178,11 +160,11 @@ impl From<&super::SystemPrompt> for SystemPrompt {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
+    use futures::StreamExt;
     use mockito::Matcher;
     use url::Url;
 
-    use crate::llm::{AssistantMessage, LlmClient, Message, SystemPrompt, ToolCall, UserMessagePart};
+    use crate::llm::{AssistantMessageContent, AssistantMessagePart, LlmClient, Message, SystemPrompt, UserMessageContent, UserMessagePart};
 
     use super::AnthropicLlmClient;
 
@@ -200,20 +182,16 @@ mod tests {
             ],
             messages: vec![
                 Message::User { parts: vec![
-                    UserMessagePart::Text("Part 1".to_string()),
-                    UserMessagePart::Image { data: Bytes::from(&b"0x120x17"[..]), media_type: crate::llm::ImageMediaType::PNG },
-                    UserMessagePart::File { data: Bytes::from(&b"0xf10xeb"[..]), media_type: crate::llm::FileMediaType::PDF },
-                    UserMessagePart::File { data: Bytes::from("Hello world"), media_type: crate::llm::FileMediaType::PlainText },
+                    UserMessagePart { content: UserMessageContent::Text { text: "Part 1".to_string() } },
                 ] },
-                Message::Assistant(AssistantMessage {
-                    content: Some("Response".to_string()),
-                    tool_calls: vec![
-                        ToolCall { id: "abc".to_string(), function_name: "func".to_string(), function_args_json: r#"{"key": "value"}"#.to_string() }
-                    ]
-                }),
-                Message::Tool { content: "Tool response".to_string(), tool_call_id: "abc".to_string() },
+                Message::Assistant { parts: vec![
+                    AssistantMessagePart {
+                        complete: true,
+                        content: AssistantMessageContent::Text { text: "Response".to_string() },
+                    }
+                ] },
                 Message::User { parts: vec![
-                    UserMessagePart::Text("Part 2".to_string())
+                    UserMessagePart { content: UserMessageContent::Text { text: "Part 2".to_string() } },
                 ] }
             ]
         };
@@ -236,30 +214,6 @@ mod tests {
         {
           "type": "text",
           "text": "Part 1"
-        },
-        {
-          "type": "image",
-          "source": {
-            "data": "MHgxMjB4MTc=",
-            "media_type": "image/png",
-            "type": "base64"
-          }
-        },
-        {
-          "type": "document",
-          "source": {
-            "data": "MHhmMTB4ZWI=",
-            "media_type": "application/pdf",
-            "type": "base64"
-          }
-        },
-        {
-          "type": "document",
-          "source": {
-            "data": "Hello world",
-            "media_type": "text/plain",
-            "type": "text"
-          }
         }
       ]
     },
@@ -269,17 +223,6 @@ mod tests {
         {
           "type": "text",
           "text": "Response"
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "abc",
-          "content": "Tool response",
-          "is_error": false
         }
       ]
     },
@@ -299,11 +242,12 @@ mod tests {
             .with_body(r#"{"content": [{"type": "text", "text": "My response"}]}"#)
             .create();
 
-
-        let result = anthropic_client.complete(request).await;
+        let result = anthropic_client.complete(&request).await.next().await.expect("Did not contain response");
 
         mock.assert();
 
-        assert_eq!(result.unwrap().message.content, Some("My response".to_string()));
+        assert_eq!(*result.unwrap().first().unwrap(), Message::Assistant { parts: vec![
+            AssistantMessagePart { complete: true, content: AssistantMessageContent::Text { text: "My response".to_string() } }
+        ] });
     }
 }
