@@ -2,12 +2,14 @@ use lliminal::llm::{Message, UserMessageContent, UserMessagePart};
 
 pub struct Chat {
     pub messages: Vec<Message>,
+    pub user_input: bool
 }
 
 impl Default for Chat {
     fn default() -> Self {
         Self {
             messages: vec![],
+            user_input: true
         }
     }
 }
@@ -21,5 +23,6 @@ impl Chat {
                 }
             ]}
         );
+        self.user_input = false;
     }
 }

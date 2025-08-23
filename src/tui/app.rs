@@ -22,8 +22,8 @@ impl Default for App {
 
         // Controller
         let chat_controller = (ChatController { chat: chat_rx, chat_input: chat_input_rx.clone() }).launch();
-        let crossterm_controller = (CrosstermController { app_state: app_state_rx.clone(), chat_input: chat_input_rx, chat_controller: chat_controller.clone() }).launch();
-        (CursorController { app_state: app_state_rx, chat_input: chat_input_tx.clone() }).launch();
+        let crossterm_controller = (CrosstermController { app_state: app_state_rx.clone(), chat: chat_tx.clone(), chat_input: chat_input_rx, chat_controller: chat_controller.clone() }).launch();
+        (CursorController { app_state: app_state_rx, chat: chat_tx.clone(), chat_input: chat_input_tx.clone() }).launch();
 
         // View
         let chat_widget = ChatWidget { chat: chat_tx, chat_input: chat_input_tx };
