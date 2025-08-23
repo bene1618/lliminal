@@ -41,9 +41,11 @@ impl App {
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
         while self.app_state.borrow().running {
             terminal.draw(|frame| self.draw(frame))?;
-            match self.event_handler.next().await? {
-                Event::Tick => self.tick(),
-                Event::Crossterm(event) => self.crossterm_controller.send(event)?
+            for event in self.event_handler.recv_many().await? {
+                match event {
+                    Event::Tick => self.tick(),
+                    Event::Crossterm(event) => self.crossterm_controller.send(event)?
+                }
             }
         }
         Ok(())

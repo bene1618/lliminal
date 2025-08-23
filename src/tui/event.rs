@@ -1,4 +1,4 @@
-use color_eyre::eyre::OptionExt;
+use color_eyre::eyre::eyre;
 use futures::{FutureExt, StreamExt};
 use crossterm::event::Event as CrosstermEvent;
 use std::time::Duration;
@@ -47,11 +47,13 @@ impl EventHandler {
     /// This function returns an error if the sender channel is disconnected. This can happen if an
     /// error occurs in the event thread. In practice, this should not happen unless there is a
     /// problem with the underlying terminal.
-    pub async fn next(&mut self) -> color_eyre::Result<Event> {
-        self.receiver
-            .recv()
-            .await
-            .ok_or_eyre("Failed to receive event")
+    pub async fn recv_many(&mut self) -> color_eyre::Result<Vec<Event>> {
+        let mut events = Vec::new();
+        if self.receiver.recv_many(&mut events, 1000).await == 0 {
+            Err(eyre!("Failed to receive events"))
+        } else {
+            Ok(events)
+        }
     }
 }
 
