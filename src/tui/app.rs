@@ -1,61 +1,66 @@
-use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget, DefaultTerminal};
+use crossterm::event::Event as CrosstermEvent;
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget, DefaultTerminal, Frame};
 use tokio::sync::{mpsc::UnboundedSender, watch};
+use tui_input::Input;
 
-use super::{controller::{count::UpdateCount, crossterm::CrosstermController, Controller}, event::{Event, EventHandler}, view::CounterWidget, viewmodel::Count};
+use super::{controller::{ChatController, Controller, CrosstermController, CursorController}, event::{Event, EventHandler}, view::ChatWidget, viewmodel::{AppState, Chat}};
+
 
 pub struct App {
-    running: bool,
+    app_state: watch::Receiver<AppState>,
     event_handler: EventHandler,
     crossterm_controller: UnboundedSender<CrosstermEvent>,
-    counter_widget: CounterWidget
+    chat_widget: ChatWidget
 }
 
 impl Default for App {
     fn default() -> Self {
         // View model
-        let (count_rx, count_tx) = watch::channel(Count::default());
+        let (chat_rx, chat_tx) = watch::channel(Chat::default());
+        let (chat_input_rx, chat_input_tx) = watch::channel(Input::default());
+        let (app_state_rx, app_state_tx) = watch::channel(AppState::default());
 
         // Controller
-        let update_count = (UpdateCount { count: count_rx }).launch();
-        let crossterm_controller = (CrosstermController { update_count: update_count.clone() }).launch();
+        let chat_controller = (ChatController { chat: chat_rx, chat_input: chat_input_rx.clone() }).launch();
+        let crossterm_controller = (CrosstermController { app_state: app_state_rx.clone(), chat_input: chat_input_rx, chat_controller: chat_controller.clone() }).launch();
+        (CursorController { app_state: app_state_rx, chat_input: chat_input_tx.clone() }).launch();
 
         // View
-        let counter_widget = CounterWidget { count: count_tx };
+        let chat_widget = ChatWidget { chat: chat_tx, chat_input: chat_input_tx };
 
         Self {
-            running: true,
+            app_state: app_state_tx,
             event_handler: EventHandler::new(),
             crossterm_controller,
-            counter_widget
+            chat_widget
         }
     }
 }
 
 impl App {
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
-        while self.running {
-            terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
+        while self.app_state.borrow().running {
+            terminal.draw(|frame| self.draw(frame))?;
             match self.event_handler.next().await? {
                 Event::Tick => self.tick(),
-                Event::Crossterm(CrosstermEvent::Key(
-                    KeyEvent { modifiers: KeyModifiers::CONTROL, code: KeyCode::Char('c' | 'C'), .. }
-                )) => self.quit(),
                 Event::Crossterm(event) => self.crossterm_controller.send(event)?
             }
         }
         Ok(())
     }
 
-    fn tick(&mut self) {}
-
-    fn quit(&mut self) {
-        self.running = false;
+    fn draw(&self, frame: &mut Frame) {
+        frame.render_widget(self, frame.area());
+        if let Some(cursor_position) = self.app_state.borrow().cursor_position {
+            frame.set_cursor_position(cursor_position);
+        }
     }
+
+    fn tick(&mut self) {}
 }
 
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        self.counter_widget.render(area, buf);
+        self.chat_widget.render(area, buf);
     }
 }

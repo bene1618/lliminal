@@ -1,23 +1,29 @@
-use crossterm::event::Event;
-use tokio::sync::mpsc;
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use tokio::sync::{mpsc, watch};
+use tui_input::{backend::crossterm::EventHandler, Input};
 
-use super::{count::UpdateCountCommand, Controller};
+use crate::tui::viewmodel::AppState;
+
+use super::{ChatCommand, Controller};
 
 pub struct CrosstermController {
-    pub update_count: mpsc::UnboundedSender<UpdateCountCommand>
+    pub app_state: watch::Sender<AppState>,
+    pub chat_input: watch::Sender<Input>,
+    pub chat_controller: mpsc::UnboundedSender<ChatCommand>,
 }
 
 impl Controller<Event> for CrosstermController {
     fn handle(&self, event: Event) {
         match event {
-            Event::Key(key_event) => {
-                match key_event.code {
-                    crossterm::event::KeyCode::Left => { self.update_count.send(UpdateCountCommand::Decrease).unwrap() },
-                    crossterm::event::KeyCode::Right => { self.update_count.send(UpdateCountCommand::Increase).unwrap() },
-                    _ => {}
-                }
-            }
-            _ => {}
+            Event::Key(
+                KeyEvent { modifiers: KeyModifiers::CONTROL, code: KeyCode::Char('c' | 'C'), .. }
+            ) => self.app_state.send_modify(|state| { state.running = false; }),
+            Event::Key(
+                KeyEvent { modifiers: KeyModifiers::NONE, code: KeyCode::Enter, .. }
+            ) => self.chat_controller.send(ChatCommand::Submit).unwrap(),
+            _ => self.chat_input.send_modify(|input| {
+                input.handle_event(&event);
+            })
         }
     }
 }

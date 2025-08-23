@@ -1,3 +1,3 @@
-mod counter;
+mod chat;
 
-pub use counter::CounterWidget;
+pub use chat::ChatWidget;
