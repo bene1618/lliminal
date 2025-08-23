@@ -1,5 +1,6 @@
 mod tui;
 
-fn main() {
-    tui::main()
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+    tui::main().await
 }
