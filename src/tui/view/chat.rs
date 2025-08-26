@@ -1,4 +1,4 @@
-use ratatui::{buffer::Buffer, layout::{Constraint, Layout, Rect}, widgets::{Block, List, Paragraph, Widget}};
+use ratatui::{buffer::Buffer, layout::{Constraint, Layout, Rect}, widgets::{Block, Paragraph, Widget, Wrap}};
 use tokio::sync::watch;
 use tui_input::Input;
 
@@ -21,22 +21,21 @@ impl Widget for &ChatWidget {
             .block(Block::bordered().title("Input"));
         input.render(input_area, buf);
 
-        let messages = List::new(
-            self.chat.borrow().messages.iter().rev().map(|msg| {
-                match msg {
-                    lliminal::llm::Message::User { parts } => {
-                        "User: ".to_owned() + &parts.iter().map(|p| match &p.content {
-                            lliminal::llm::UserMessageContent::Text { text } => text.clone(),
-                        }).collect::<Vec<_>>().join("\n")
-                    },
-                    lliminal::llm::Message::Assistant { parts } => {
-                        "Assistant: ".to_owned() + &parts.iter().map(|p| match &p.content {
-                            lliminal::llm::AssistantMessageContent::Text { text } => text.clone(),
-                        }).collect::<Vec<_>>().join("\n")
-                    }
-                }
-            })
-        ).block(Block::bordered().title("Messages"));
-        messages.render(messages_area, buf);
+        let messages = self.chat.borrow().messages.iter().rev().map(|msg| match msg {
+            lliminal::llm::Message::User { parts } => {
+                "User: ".to_owned() + &parts.iter().map(|p| match &p.content {
+                    lliminal::llm::UserMessageContent::Text { text } => text.clone(),
+                }).collect::<Vec<_>>().join("\n")
+            },
+            lliminal::llm::Message::Assistant { parts } => {
+                "Assistant: ".to_owned() + &parts.iter().map(|p| match &p.content {
+                    lliminal::llm::AssistantMessageContent::Text { text } => text.clone(),
+                }).collect::<Vec<_>>().join("\n")
+            }
+        }).collect::<Vec<_>>().join("\n");
+        let paragraph = Paragraph::new(messages)
+            .block(Block::bordered().title("Messages"))
+            .wrap(Wrap { trim: true });
+        paragraph.render(messages_area, buf);
     }
 }

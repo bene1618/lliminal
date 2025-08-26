@@ -21,7 +21,7 @@ impl Default for App {
         let (app_state_rx, app_state_tx) = watch::channel(AppState::default());
 
         // Controller
-        let chat_controller = (ChatController { chat: chat_rx, chat_input: chat_input_rx.clone() }).launch();
+        let chat_controller = (ChatController { chat: chat_rx, chat_input: chat_input_rx.clone(), self_sender: None }).launch();
         let crossterm_controller = (CrosstermController { app_state: app_state_rx.clone(), chat: chat_tx.clone(), chat_input: chat_input_rx, chat_controller: chat_controller.clone() }).launch();
         (CursorController { app_state: app_state_rx, chat: chat_tx.clone(), chat_input: chat_input_tx.clone() }).launch();
 

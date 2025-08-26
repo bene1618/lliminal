@@ -1,5 +1,6 @@
 use lliminal::llm::{Message, UserMessageContent, UserMessagePart};
 
+#[derive(Clone, Debug)]
 pub struct Chat {
     pub messages: Vec<Message>,
     pub user_input: bool
@@ -24,5 +25,9 @@ impl Chat {
             ]}
         );
         self.user_input = false;
+    }
+
+    pub fn wait_for_user(&mut self) {
+        self.user_input = true;
     }
 }
