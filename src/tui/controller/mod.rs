@@ -1,10 +1,8 @@
 mod chat;
 mod crossterm;
-mod cursor;
 
 pub use chat::*;
 pub use crossterm::*;
-pub use cursor::*;
 
 use tokio::sync::mpsc;
 

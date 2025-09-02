@@ -3,7 +3,7 @@ use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget, DefaultTerminal, Fr
 use tokio::sync::{mpsc::UnboundedSender, watch};
 use tui_input::Input;
 
-use super::{controller::{ChatController, Controller, CrosstermController, CursorController}, event::{Event, EventHandler}, view::ChatWidget, viewmodel::{AppState, Chat}};
+use super::{controller::{ChatController, Controller, CrosstermController}, event::{Event, EventHandler}, view::ChatWidget, viewmodel::{AppState, Chat}};
 
 
 pub struct App {
@@ -23,10 +23,9 @@ impl Default for App {
         // Controller
         let chat_controller = (ChatController { chat: chat_rx, chat_input: chat_input_rx.clone(), self_sender: None }).launch();
         let crossterm_controller = (CrosstermController { app_state: app_state_rx.clone(), chat: chat_tx.clone(), chat_input: chat_input_rx, chat_controller: chat_controller.clone() }).launch();
-        (CursorController { app_state: app_state_rx, chat: chat_tx.clone(), chat_input: chat_input_tx.clone() }).launch();
 
         // View
-        let chat_widget = ChatWidget { chat: chat_tx, chat_input: chat_input_tx };
+        let chat_widget = ChatWidget { app_state: app_state_rx, chat: chat_tx, chat_input: chat_input_tx };
 
         Self {
             app_state: app_state_tx,
