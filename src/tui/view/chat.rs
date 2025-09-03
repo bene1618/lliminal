@@ -24,22 +24,30 @@ impl Widget for &ChatWidget {
 
 impl ChatWidget {
     fn render_messages(&self, area: Rect, buf: &mut Buffer) {
+        let scroll = self.chat.borrow().scroll;
         let mut y = area.y + area.height - 1;
         for line in self.chat.borrow().messages.iter().flat_map(|msg| match msg {
             lliminal::llm::Message::User { parts } => user_message_lines(parts, area.width),
             lliminal::llm::Message::Assistant { parts } => assistant_message_lines(parts, area.width)
-        }).rev() {
+        }).rev().skip(scroll) {
             if y < area.y {
                 break;
             }
             line.render(Rect { x: area.x, y, width: area.width, height: 1 }, buf);
+            if y == 0 {
+                break;
+            }
             y = y - 1;
         }
     }
 
     fn render_input(&self, area: Rect, buf: &mut Buffer) {
         let chat_input = self.chat_input.borrow().clone();
+        let width = area.width.saturating_sub(3);
+        let scroll = chat_input.visual_scroll(width as usize);
+
         let input = Paragraph::new(chat_input.value())
+            .scroll((0, scroll as u16))
             .block(Block::bordered().title("Input"));
 
         input.render(area, buf);
@@ -47,7 +55,7 @@ impl ChatWidget {
         if self.chat.borrow().user_input {
             self.app_state.send_modify(|app_state| {
                 app_state.cursor_position = Some(Position::from((
-                    area.x + chat_input.visual_cursor() as u16 + 1,
+                    area.x + chat_input.visual_cursor().saturating_sub(scroll) as u16 + 1,
                     area.y + 1
                 )));
             });
@@ -72,7 +80,7 @@ fn assistant_message_lines(parts: &Vec<AssistantMessagePart>, width: u16) -> Vec
             AssistantMessageContent::Text { text } => text.clone() + if *complete { "" } else { " ..." },
         }
     }).collect::<Vec<_>>().join("\n");
-    into_formatted_lines(text, width, Style::default().italic())
+    into_formatted_lines(text, width, Style::default())
 }
 
 fn into_formatted_lines<S>(text: String, width: u16, style: S) -> Vec<Line<'static>>

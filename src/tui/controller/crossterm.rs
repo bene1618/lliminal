@@ -21,6 +21,12 @@ impl Controller<Event> for CrosstermController {
                 KeyEvent { modifiers: KeyModifiers::CONTROL, code: KeyCode::Char('c' | 'C'), .. }
             ) => self.app_state.send_modify(|state| { state.running = false; }),
             Event::Key(
+                KeyEvent { code: KeyCode::PageUp, .. }
+            ) => self.chat_controller.send(ChatCommand::ScrollUp).unwrap(),
+            Event::Key(
+                KeyEvent { code: KeyCode::PageDown, .. }
+            ) => self.chat_controller.send(ChatCommand::ScrollDown).unwrap(),
+            Event::Key(
                 KeyEvent { modifiers: KeyModifiers::NONE, code: KeyCode::Enter, .. }
             ) if chat.user_input => self.chat_controller.send(ChatCommand::Submit).unwrap(),
             _ if chat.user_input => self.chat_input.send_modify(|input| {

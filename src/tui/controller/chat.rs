@@ -20,21 +20,23 @@ impl Controller<ChatCommand> for ChatController {
     fn handle(&self, event: ChatCommand) {
         match event {
             ChatCommand::Submit => {
-                let old_input = self.chat_input.send_replace(Input::default());
-                self.chat.send_modify(|chat| {
-                    chat.submit_user_input(old_input.value());
-                });
-                let chat_sender = self.chat.clone();
-                let self_sender = self.self_sender.clone();
-                tokio::spawn(async move {
-                    ChatController::call_llm(chat_sender, self_sender.expect("Must call launch before handling commands")).await
-                });
-            },
+                        let old_input = self.chat_input.send_replace(Input::default());
+                        self.chat.send_modify(|chat| {
+                            chat.submit_user_input(old_input.value());
+                        });
+                        let chat_sender = self.chat.clone();
+                        let self_sender = self.self_sender.clone();
+                        tokio::spawn(async move {
+                            ChatController::call_llm(chat_sender, self_sender.expect("Must call launch before handling commands")).await
+                        });
+                    },
             ChatCommand::WaitForUser => {
-                self.chat.send_modify(|chat| {
-                    chat.wait_for_user();
-                });
-            }
+                        self.chat.send_modify(|chat| {
+                            chat.wait_for_user();
+                        });
+                    }
+            ChatCommand::ScrollUp => self.chat.send_modify(|chat| chat.scroll_up(4)),
+            ChatCommand::ScrollDown => self.chat.send_modify(|chat| chat.scroll_down(4)),
         }
     }
 
@@ -76,6 +78,8 @@ impl ChatController {
 
 pub enum ChatCommand {
     Submit,
-    WaitForUser
+    WaitForUser,
+    ScrollUp,
+    ScrollDown
 }
 
