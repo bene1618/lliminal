@@ -52,7 +52,7 @@ impl ChatController {
                 base_url: Url::parse(
                               &env::var("ANTHROPIC_URL").unwrap_or("https://api.anthropic.com".to_string())
                           ).expect("Invalid URL provided"),
-                api_key: env::var("ANTHROPIC_API_KEY").expect("Must set ANTHROPIC_API_KEY env var"),
+                api_key: env::var("ANTHROPIC_API_KEY").unwrap(),
                 model: "claude-3-5-haiku-latest".to_string(),
                 max_tokens: 1024
             }
@@ -65,13 +65,21 @@ impl ChatController {
 
         let mut response = client.complete(&request).await;
         while let Some(response) = response.next().await {
-            let mut response = response.expect("Seems to have an error");
-            let mut new_messages = messages.clone();
-            new_messages.append(&mut response);
-            chat.send_modify(|c| {
-                c.messages = new_messages;
-            });
-            chat_controller.send(ChatCommand::WaitForUser).unwrap();
+            match response {
+                Ok(mut response) => {
+                    let mut new_messages = messages.clone();
+                    new_messages.append(&mut response);
+                    chat.send_modify(|c| {
+                        c.messages = new_messages;
+                    });
+                    chat_controller.send(ChatCommand::WaitForUser).expect("Chat controller does not receive values");
+                },
+                Err(err) => {
+                    chat.send_modify(|c| {
+                        c.error = Some(err);
+                    });
+                },
+            }
         }
     }
 }

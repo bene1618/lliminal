@@ -47,7 +47,7 @@ impl ChatWidget {
         let scroll = chat_input.visual_scroll(width as usize);
 
         let input = Paragraph::new(chat_input.value())
-            .scroll((0, u16::try_from(scroll).unwrap()))
+            .scroll((0, u16::try_from(scroll).expect("Overflow for chat scroll position")))
             .block(Block::bordered().title("Input"));
 
         input.render(area, buf);
@@ -55,7 +55,7 @@ impl ChatWidget {
         if self.chat.borrow().user_input {
             self.app_state.send_modify(|app_state| {
                 app_state.cursor_position = Some(Position::from((
-                    area.x + u16::try_from(chat_input.visual_cursor().saturating_sub(scroll)).unwrap() + 1,
+                    area.x + 1 + u16::try_from(chat_input.visual_cursor().saturating_sub(scroll)).expect("Overflow for chat scroll position"),
                     area.y + 1
                 )));
             });

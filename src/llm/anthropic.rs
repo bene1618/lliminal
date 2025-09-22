@@ -1,8 +1,8 @@
 use crate::llm::{AssistantMessageContent, LlmError};
 
 use super::{AssistantMessagePart, CompletionRequest, LlmClient, Result, UserMessagePart};
-use eventsource_stream::Eventsource;
-use futures::{channel::mpsc, stream::IntoStream, SinkExt, StreamExt, TryStreamExt};
+use eventsource_stream::{Event, EventStreamError, Eventsource};
+use futures::{channel::mpsc, stream::IntoStream, SinkExt, Stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
@@ -33,36 +33,50 @@ impl LlmClient for AnthropicLlmClient {
             stream: true
         };
         let client = reqwest::Client::new();
-        let url = self.config.base_url.join(PATH).unwrap();
-        let mut response_eventsource = client.post(url)
+        let url = self.config.base_url.join(PATH).expect("Cannot parse Anthropic request URL");
+
+        let (mut sender, receiver) = mpsc::unbounded::<Result<Vec<super::Message>>>();
+
+        match client.post(url)
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", API_VERSION)
             .json(&request)
             .send()
             .await
-            .unwrap()
-            .bytes_stream()
-            .eventsource();
-        let (mut sender, receiver) = mpsc::unbounded::<Result<Vec<super::Message>>>();
-        tokio::spawn(async move {
-            let mut state_holder = StreamingResponseStateHolder::new();
-            while let Some(event) = response_eventsource.next().await {
-                match event {
-                    Ok(event) => {
-                        if let Some(current_result) = state_holder.handle_event(&event.event, &event.data) {
-                            sender.send(current_result).await.unwrap();
-                        }
-                        if state_holder.is_completed() {
-                            break;
-                        }
-                    },
-                    Err(_) => {
-                        sender.send(Err(LlmError::UnexpectedResponse)).await.unwrap();
-                    }
-                }
-            }
-        });
+        {
+            Ok(response) => {
+                tokio::spawn(async move {
+                    let response_eventsource = response.bytes_stream().eventsource();
+                    handle_response(response_eventsource, sender).await;
+                });
+            },
+            Err(_) => {
+                sender.send(Err(LlmError::ConnectionError)).await.expect("Unable to send result");
+            },
+        }
+
         receiver.into_stream()
+    }
+}
+
+async fn handle_response<T>(mut eventsource: T, mut sender: mpsc::UnboundedSender<Result<Vec<super::Message>>>)
+    where T: Stream<Item = std::result::Result<Event, EventStreamError<reqwest::Error>>> + Unpin
+{
+    let mut state_holder = StreamingResponseStateHolder::new();
+    while let Some(event) = eventsource.next().await {
+        match event {
+            Ok(event) => {
+                if let Some(current_result) = state_holder.handle_event(&event.event, &event.data) {
+                    sender.send(current_result).await.expect("Unable to send result");
+                }
+                if state_holder.is_completed() {
+                    break;
+                }
+            },
+            Err(_) => {
+                sender.send(Err(LlmError::UnexpectedResponse)).await.expect("Unable to send result");
+            }
+        }
     }
 }
 

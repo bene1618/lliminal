@@ -1,10 +1,11 @@
-use lliminal::llm::{Message, UserMessageContent, UserMessagePart};
+use lliminal::llm::{LlmError, Message, UserMessageContent, UserMessagePart};
 
 #[derive(Clone, Debug)]
 pub struct Chat {
     pub messages: Vec<Message>,
     pub user_input: bool,
-    pub scroll: usize
+    pub scroll: usize,
+    pub error: Option<LlmError>
 }
 
 impl Default for Chat {
@@ -12,7 +13,8 @@ impl Default for Chat {
         Self {
             messages: vec![],
             user_input: true,
-            scroll: 0
+            scroll: 0,
+            error: None
         }
     }
 }
