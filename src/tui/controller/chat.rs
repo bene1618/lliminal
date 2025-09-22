@@ -27,7 +27,7 @@ impl Controller<ChatCommand> for ChatController {
                         let chat_sender = self.chat.clone();
                         let self_sender = self.self_sender.clone();
                         tokio::spawn(async move {
-                            ChatController::call_llm(chat_sender, self_sender.expect("Must call launch before handling commands")).await
+                            ChatController::call_llm(chat_sender, self_sender.expect("Must call launch before handling commands")).await;
                         });
                     },
             ChatCommand::WaitForUser => {
@@ -69,7 +69,7 @@ impl ChatController {
             let mut new_messages = messages.clone();
             new_messages.append(&mut response);
             chat.send_modify(|c| {
-                c.messages = new_messages
+                c.messages = new_messages;
             });
             chat_controller.send(ChatCommand::WaitForUser).unwrap();
         }

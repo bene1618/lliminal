@@ -28,8 +28,8 @@ impl LlmClient for AnthropicLlmClient {
         let request = MessagesRequest {
             model: self.config.model.clone(),
             max_tokens: self.config.max_tokens,
-            system: request.system.iter().map(|prompt| prompt.into()).collect(),
-            messages: request.messages.iter().map(|message| message.into()).collect(),
+            system: request.system.iter().map(Into::into).collect(),
+            messages: request.messages.iter().map(Into::into).collect(),
             stream: true
         };
         let client = reqwest::Client::new();
@@ -49,7 +49,7 @@ impl LlmClient for AnthropicLlmClient {
             while let Some(event) = response_eventsource.next().await {
                 match event {
                     Ok(event) => {
-                        if let Some(current_result) = state_holder.handle_event(event.event, event.data) {
+                        if let Some(current_result) = state_holder.handle_event(&event.event, &event.data) {
                             sender.send(current_result).await.unwrap();
                         }
                         if state_holder.is_completed() {
@@ -94,20 +94,20 @@ impl StreamingResponseStateHolder {
         Self { state: StreamingResponseState::Init, response_parts: vec![] }
     }
 
-    fn handle_event(&mut self, event: String, data: String) -> Option<Result<Vec<super::Message>>> {
-        match (&self.state, event.as_str()) {
+    fn handle_event(&mut self, event: &str, data: &str) -> Option<Result<Vec<super::Message>>> {
+        match (&self.state, event) {
             (StreamingResponseState::Init, "message_start") => {
                 self.state = StreamingResponseState::MessageTransferring;
                 None
             },
             (StreamingResponseState::MessageTransferring, "content_block_start") => {
                 self.state = StreamingResponseState::ContentBlockStarted {
-                    current_content: AssistantMessageContent::Text { text: "".to_string() }
+                    current_content: AssistantMessageContent::Text { text: String::new() }
                 };
                 None
             },
             (StreamingResponseState::ContentBlockStarted { current_content }, "content_block_delta") => {
-                if let Ok(delta_event) = serde_json::from_str::<ContentBlockDeltaEvent>(&data) {
+                if let Ok(delta_event) = serde_json::from_str::<ContentBlockDeltaEvent>(data) {
                     self.state = StreamingResponseState::ContentBlockStarted {
                         current_content: match current_content {
                             AssistantMessageContent::Text { text } => AssistantMessageContent::Text { text: text.to_owned() + &delta_event.delta.text },

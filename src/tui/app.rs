@@ -7,7 +7,7 @@ use super::{controller::{ChatController, Controller, CrosstermController}, event
 
 
 pub struct App {
-    app_state: watch::Receiver<AppState>,
+    state: watch::Receiver<AppState>,
     event_handler: EventHandler,
     crossterm_controller: UnboundedSender<CrosstermEvent>,
     chat_widget: ChatWidget
@@ -28,7 +28,7 @@ impl Default for App {
         let chat_widget = ChatWidget { app_state: app_state_rx, chat: chat_tx, chat_input: chat_input_tx };
 
         Self {
-            app_state: app_state_tx,
+            state: app_state_tx,
             event_handler: EventHandler::new(),
             crossterm_controller,
             chat_widget
@@ -38,12 +38,12 @@ impl Default for App {
 
 impl App {
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
-        while self.app_state.borrow().running {
+        while self.state.borrow().running {
             terminal.draw(|frame| self.draw(frame))?;
             for event in self.event_handler.recv_many().await? {
                 match event {
-                    Event::Tick => self.tick(),
-                    Event::Crossterm(event) => self.crossterm_controller.send(event)?
+                    Event::Crossterm(event) => self.crossterm_controller.send(event)?,
+                    Event::Tick => {},
                 }
             }
         }
@@ -52,12 +52,10 @@ impl App {
 
     fn draw(&self, frame: &mut Frame) {
         frame.render_widget(self, frame.area());
-        if let Some(cursor_position) = self.app_state.borrow().cursor_position {
+        if let Some(cursor_position) = self.state.borrow().cursor_position {
             frame.set_cursor_position(cursor_position);
         }
     }
-
-    fn tick(&mut self) {}
 }
 
 impl Widget for &App {

@@ -47,7 +47,7 @@ impl ChatWidget {
         let scroll = chat_input.visual_scroll(width as usize);
 
         let input = Paragraph::new(chat_input.value())
-            .scroll((0, scroll as u16))
+            .scroll((0, u16::try_from(scroll).unwrap()))
             .block(Block::bordered().title("Input"));
 
         input.render(area, buf);
@@ -55,7 +55,7 @@ impl ChatWidget {
         if self.chat.borrow().user_input {
             self.app_state.send_modify(|app_state| {
                 app_state.cursor_position = Some(Position::from((
-                    area.x + chat_input.visual_cursor().saturating_sub(scroll) as u16 + 1,
+                    area.x + u16::try_from(chat_input.visual_cursor().saturating_sub(scroll)).unwrap() + 1,
                     area.y + 1
                 )));
             });
@@ -71,7 +71,7 @@ fn user_message_lines(parts: &[UserMessagePart], width: u16) -> Vec<Line> {
             UserMessageContent::Text { text } => "> ".to_owned() + text,
         }
     }).collect::<Vec<_>>().join("\n");
-    into_formatted_lines(text, width, Style::default().italic())
+    into_formatted_lines(&text, width, &Style::default().italic())
 }
 
 fn assistant_message_lines(parts: &[AssistantMessagePart], width: u16) -> Vec<Line> {
@@ -80,13 +80,13 @@ fn assistant_message_lines(parts: &[AssistantMessagePart], width: u16) -> Vec<Li
             AssistantMessageContent::Text { text } => text.clone() + if *complete { "" } else { " ..." },
         }
     }).collect::<Vec<_>>().join("\n");
-    into_formatted_lines(text, width, Style::default())
+    into_formatted_lines(&text, width, &Style::default())
 }
 
-fn into_formatted_lines<S>(text: String, width: u16, style: S) -> Vec<Line<'static>>
+fn into_formatted_lines<S>(text: &str, width: u16, style: &S) -> Vec<Line<'static>>
     where S: Into<Style> + Clone
 {
-    textwrap::wrap(&text, width as usize).iter()
+    textwrap::wrap(text, width as usize).iter()
         .map(|line_cow| String::from(line_cow.clone()))
         .map(|line| Line::styled(line, style.clone()))
         .collect()

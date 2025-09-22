@@ -80,7 +80,7 @@ impl EventTask {
             let tick_delay = tick.tick();
             let crossterm_event = reader.next().fuse();
             tokio::select! {
-              _ = self.sender.closed() => {
+              () = self.sender.closed() => {
                 break;
               }
               _ = tick_delay => {
