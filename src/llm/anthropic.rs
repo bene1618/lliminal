@@ -212,7 +212,7 @@ struct SystemPrompt {
 }
 
 impl Message {
-    fn from_user_message_parts(parts: &Vec<UserMessagePart>) -> Self {
+    fn from_user_message_parts(parts: &[UserMessagePart]) -> Self {
         Message {
             role: MessageRole::User,
             content: parts.iter().cloned().map(|p| match p.content {
@@ -221,7 +221,7 @@ impl Message {
         }
     }
 
-    fn from_assistant_message_parts(parts: &Vec<AssistantMessagePart>) -> Self {
+    fn from_assistant_message_parts(parts: &[AssistantMessagePart]) -> Self {
         Message {
             role: MessageRole::Assistant,
             content: parts.iter().cloned().filter_map(|p| match p {

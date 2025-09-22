@@ -37,7 +37,7 @@ impl ChatWidget {
             if y == 0 {
                 break;
             }
-            y = y - 1;
+            y -= 1;
         }
     }
 
@@ -65,16 +65,16 @@ impl ChatWidget {
     }
 }
 
-fn user_message_lines(parts: &Vec<UserMessagePart>, width: u16) -> Vec<Line> {
+fn user_message_lines(parts: &[UserMessagePart], width: u16) -> Vec<Line> {
     let text = parts.iter().map(|UserMessagePart { content }| {
         match content {
-            UserMessageContent::Text { text } => "> ".to_owned() + &text,
+            UserMessageContent::Text { text } => "> ".to_owned() + text,
         }
     }).collect::<Vec<_>>().join("\n");
     into_formatted_lines(text, width, Style::default().italic())
 }
 
-fn assistant_message_lines(parts: &Vec<AssistantMessagePart>, width: u16) -> Vec<Line> {
+fn assistant_message_lines(parts: &[AssistantMessagePart], width: u16) -> Vec<Line> {
     let text = parts.iter().map(|AssistantMessagePart { content, complete }| {
         match content {
             AssistantMessageContent::Text { text } => text.clone() + if *complete { "" } else { " ..." },
